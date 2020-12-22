@@ -43,6 +43,15 @@
 #include <drm/drm_scdc_helper.h>
 
 #include "drm_crtc_internal.h"
+static unsigned int drm_mode_prune_hlimit = 0;
+module_param(drm_mode_prune_hlimit, uint, 0600);
+MODULE_PARM_DESC(drm_mode_prune_hlimit,
+		 "h-active larger than the limit will be pruned");
+
+static unsigned int drm_mode_prune_vlimit = 0;
+module_param(drm_mode_prune_vlimit, uint, 0600);
+MODULE_PARM_DESC(drm_mode_prune_vlimit,
+		 "v-active larger than the limit will be pruned");
 
 #define version_greater(edid, maj, min) \
 	(((edid)->version > (maj)) || \
@@ -5207,6 +5216,28 @@ int drm_add_edid_modes(struct drm_connector *connector, struct edid *edid)
 
 	if (quirks & EDID_QUIRK_FORCE_12BPC)
 		connector->display_info.bpc = 12;
+
+	/**
+	 * Prune all modes larger then the specific h/v active.
+	 * Then pick the 1st one in sorted mode list as the new preferred.
+	 */
+	if (drm_mode_prune_hlimit || drm_mode_prune_vlimit) {
+		struct drm_display_mode *mode, *t;
+		list_for_each_entry_safe(mode, t, &connector->probed_modes, head) {
+			if ((drm_mode_prune_hlimit && mode->hdisplay > drm_mode_prune_hlimit) ||
+			    (drm_mode_prune_vlimit && mode->vdisplay > drm_mode_prune_vlimit)) {
+				list_del(&mode->head);
+				drm_mode_destroy(connector->dev, mode);
+			}
+			else
+				mode->type &= ~DRM_MODE_TYPE_PREFERRED;
+		}
+
+		drm_mode_sort(&connector->probed_modes);
+		mode = list_first_entry(&connector->probed_modes,
+					struct drm_display_mode, head);
+		mode->type |= DRM_MODE_TYPE_PREFERRED;
+	}
 
 	return num_modes;
 }
